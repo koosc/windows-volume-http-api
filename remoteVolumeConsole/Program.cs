@@ -6,47 +6,28 @@ using System.Linq;
 using System.Drawing;
 using Nancy;
 using Nancy.Hosting.Self;
+using Newtonsoft.Json;
 
 namespace SetAppVolumne
 {
 
-    public class hellomodule : NancyModule
+    public class Application
     {
-        public hellomodule()
-        {
-            //get("/", args => this.response.astext("hello world"));
-            Get["/"] = parameters => "hello world";
-        }
+        public string name { get; set; }
+        public int volume { get; set; }
     }
 
 
-    class Program
+    public class volumeApiModule : NancyModule
     {
-
-        static void Main(string[] args)
+        public volumeApiModule()
         {
-            const string app = "Microsoft Edge"; HostConfiguration hostConfigs = new HostConfiguration();
-            hostConfigs.UrlReservations.CreateAutomatically = true;
-            var host = new NancyHost(hostConfigs, new Uri("http://localhost:12345"));
-            host.Start();
-            Console.ReadKey();
-
-            foreach (string name in EnumerateApplications())
+            //get("/", args => this.response.astext("hello world"));
+            Get["/"] = parameters => "hello world";
+            Get["/getApplications"] = parameters =>
             {
-                Console.WriteLine("name:" + name);
-                if (name == app)
-                {
-                    // display mute state & volume level (% of master)
-                    Console.WriteLine("Mute:" + GetApplicationMute(app));
-                    Console.WriteLine("Volume:" + GetApplicationVolume(app));
-
-                    // mute the application
-                    SetApplicationMute(app, true);
-
-                    // set the volume to half of master volume (50%)
-                    SetApplicationVolume(app, 50);
-                }
-            }
+                return JsonConvert.SerializeObject(EnumerateApplications());
+            };
         }
 
         public static float? GetApplicationVolume(string name)
@@ -91,11 +72,14 @@ namespace SetAppVolumne
             volume.SetMute(mute, ref guid);
         }
 
-        public static IEnumerable<string> EnumerateApplications()
+        public static List<Application> EnumerateApplications()
         {
             // get the speakers (1st render + multimedia) device
+
+            List<Application> applications = new List<Application>();
+
             IMMDeviceEnumerator deviceEnumerator = (IMMDeviceEnumerator)(new MMDeviceEnumerator());
-            IMMDevice speakers= null;
+            IMMDevice speakers = null;
             deviceEnumerator.GetDefaultAudioEndpoint(EDataFlow.eRender, ERole.eMultimedia, out speakers);
 
             // activate the session manager. we need the enumerator
@@ -112,7 +96,7 @@ namespace SetAppVolumne
 
             for (int i = 0; i < count; ++i)
             {
-                IAudioSessionControl2 ctl= null;
+                IAudioSessionControl2 ctl = null;
                 sessionEnumerator.GetSession(i, out ctl);
 
                 string dn;
@@ -154,12 +138,22 @@ namespace SetAppVolumne
 
 
                 ctl.GetDisplayName(out dn);
+
+                Application application = new Application
+                {
+                    name = dn,
+                    volume = 5
+                };
+
+                applications.Add(application);
+
                 ctl.GetIconPath(out iconPath);
                 Console.WriteLine("IconPath: " + iconPath);
 
-                yield return dn;
                 Marshal.ReleaseComObject(ctl);
             }
+
+            return applications;
             Marshal.ReleaseComObject(sessionEnumerator);
             Marshal.ReleaseComObject(mgr);
             Marshal.ReleaseComObject(speakers);
@@ -357,3 +351,49 @@ namespace SetAppVolumne
         int GetMute(out bool pbMute);
     }
 }
+
+
+    class Program
+    {
+
+        public class hellomodule : NancyModule
+        {
+            public hellomodule()
+            {
+                //get("/", args => this.response.astext("hello world"));
+                Get["/testing"] = parameters =>
+                {
+                    return "hello world";
+                };
+            }
+        }
+
+        static void Main(string[] args)
+        {
+            const string app = "Microsoft Edge";
+            HostConfiguration hostConfigs = new HostConfiguration();
+            hostConfigs.UrlReservations.CreateAutomatically = true;
+            var host = new NancyHost(hostConfigs, new Uri("http://localhost:12345"));
+            host.Start();
+            Console.ReadKey();
+
+            //foreach (string name in EnumerateApplications())
+            //{
+            //    Console.WriteLine("name:" + name);
+            //    if (name == app)
+            //    {
+            //        // display mute state & volume level (% of master)
+            //        Console.WriteLine("Mute:" + GetApplicationMute(app));
+            //        Console.WriteLine("Volume:" + GetApplicationVolume(app));
+
+            //        // mute the application
+            //        SetApplicationMute(app, true);
+
+            //        // set the volume to half of master volume (50%)
+            //        SetApplicationVolume(app, 50);
+            //    }
+            //}
+        }
+
+        
+};
