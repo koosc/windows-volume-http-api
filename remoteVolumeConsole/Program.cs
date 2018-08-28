@@ -7,6 +7,7 @@ using System.Drawing;
 using Nancy;
 using Nancy.Hosting.Self;
 using Newtonsoft.Json;
+using System.IO;
 
 namespace SetAppVolumne
 {
@@ -14,7 +15,8 @@ namespace SetAppVolumne
     public class Application
     {
         public string name { get; set; }
-        public int volume { get; set; }
+        public float? volume { get; set; }
+        public string icon { get; set; }
     }
 
 
@@ -26,7 +28,32 @@ namespace SetAppVolumne
             Get["/"] = parameters => "hello world";
             Get["/getApplications"] = parameters =>
             {
-                return JsonConvert.SerializeObject(EnumerateApplications());
+                List<Application> applications;
+                applications = EnumerateApplications();
+                //float? masterVolume = null;
+                //// Get master volume. Applications are based on this as the max level
+                //foreach (var application in applications)
+                //{
+                //    if (application.name.ToLower().Contains("audiosrv.dll")) {
+                //        masterVolume = application.volume;
+                //    }
+                //}
+
+                //foreach (var application in applications)
+                //{
+                //    if (application.name.ToLower().Contains("audiosrv.dll"))
+                //    {
+                //        masterVolume = application.volume;
+                //    }
+
+                //    if (!application.name.ToLower().Contains("audiosrv.dll"))
+                //    {
+                //        application.volume = (application.volume / 100) * (masterVolume / 100);
+                //        application.volume = application.volume * 100;
+                //    }
+                //}
+
+                    return JsonConvert.SerializeObject(applications);
             };
         }
 
@@ -103,9 +130,16 @@ namespace SetAppVolumne
                 string iconPath;
                 int pid;
                 ctl.GetProcessId(out pid);
+                ctl.GetDisplayName(out dn);
+                float? volumeLevel = GetApplicationVolume(dn);
+                Console.WriteLine(volumeLevel);
 
                 Console.WriteLine(pid);
 
+                Application application = new Application();
+
+                application.name = dn;
+                application.volume = volumeLevel;
 
 
                 var query = "SELECT ProcessId, Name, ExecutablePath FROM Win32_Process WHERE processid = " + pid.ToString();
@@ -127,7 +161,11 @@ namespace SetAppVolumne
                         {
                             var icon = Icon.ExtractAssociatedIcon(p.ExecutablePath);
 
-                            icon.ToBitmap().Save("testicon.bmp");
+                            icon.ToBitmap().Save("icon.bmp");
+                            Byte[] bytes = File.ReadAllBytes("icon.bmp");
+                            String encodedIcon = Convert.ToBase64String(bytes);
+
+                            application.icon = encodedIcon;
                             var key = p.ProcessId.ToString();
 
                             Console.WriteLine(p.ExecutablePath);
@@ -137,13 +175,8 @@ namespace SetAppVolumne
 
 
 
-                ctl.GetDisplayName(out dn);
 
-                Application application = new Application
-                {
-                    name = dn,
-                    volume = 5
-                };
+
 
                 applications.Add(application);
 
