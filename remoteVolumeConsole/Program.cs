@@ -5,9 +5,12 @@ using System.Management;
 using System.Linq;
 using System.Drawing;
 using Nancy;
+using Nancy.Extensions;
 using Nancy.Hosting.Self;
 using Newtonsoft.Json;
 using System.IO;
+using System.Diagnostics;
+
 
 namespace SetAppVolumne
 {
@@ -15,8 +18,9 @@ namespace SetAppVolumne
     public class Application
     {
         public string name { get; set; }
-        public float? volume { get; set; }
+        public int volume { get; set; }
         public string icon { get; set; }
+        public int pid{ get; set; }
     }
 
 
@@ -25,7 +29,7 @@ namespace SetAppVolumne
         public volumeApiModule()
         {
             //get("/", args => this.response.astext("hello world"));
-            Get["/"] = parameters => "hello world";
+            Get["/"] = parameters => "OK";
             Get["/getApplications"] = parameters =>
             {
                 List<Application> applications;
@@ -55,13 +59,60 @@ namespace SetAppVolumne
 
                     return JsonConvert.SerializeObject(applications);
             };
+            Post["/setVolume"] = parameters =>
+            {
+                Console.WriteLine("Got set volume request");
+
+                var dataString = this.Request.Body.AsString();
+
+                var data = JsonConvert.DeserializeObject<dynamic>(dataString);
+
+                var requestPid = (int)data.application;
+                var requestVolume = (int)data.volume;
+
+                List<Application> applications;
+                applications = EnumerateApplications();
+
+                foreach (var application in applications)
+                {
+                    if (application.pid == requestPid)
+                    {
+                        Console.WriteLine("Set volume of this application " + requestPid.ToString());
+                        SetApplicationVolume(application.pid, (float)requestVolume);
+                    }
+                }
+                //float? masterVolume = null;
+                //// Get master volume. Applications are based on this as the max level
+                //foreach (var application in applications)
+                //{
+                //    if (application.name.ToLower().Contains("audiosrv.dll")) {
+                //        masterVolume = application.volume;
+                //    }
+                //}
+
+                //foreach (var application in applications)
+                //{
+                //    if (application.name.ToLower().Contains("audiosrv.dll"))
+                //    {
+                //        masterVolume = application.volume;
+                //    }
+
+                //    if (!application.name.ToLower().Contains("audiosrv.dll"))
+                //    {
+                //        application.volume = (application.volume / 100) * (masterVolume / 100);
+                //        application.volume = application.volume * 100;
+                //    }
+                //}
+
+                return JsonConvert.SerializeObject(applications);
+            };
         }
 
-        public static float? GetApplicationVolume(string name)
+        public static float GetApplicationVolume(string name)
         {
             ISimpleAudioVolume volume = GetVolumeObject(name);
             if (volume == null)
-                return null;
+                return 0;
 
             float level;
             volume.GetMasterVolume(out level);
@@ -82,6 +133,16 @@ namespace SetAppVolumne
         public static void SetApplicationVolume(string name, float level)
         {
             ISimpleAudioVolume volume = GetVolumeObject(name);
+            if (volume == null)
+                return;
+
+            Guid guid = Guid.Empty;
+            volume.SetMasterVolume(level / 100, ref guid);
+        }
+
+        public static void SetApplicationVolume(int pid, float level)
+        {
+            ISimpleAudioVolume volume = GetVolumeObject(pid);
             if (volume == null)
                 return;
 
@@ -131,19 +192,31 @@ namespace SetAppVolumne
                 int pid;
                 ctl.GetProcessId(out pid);
                 ctl.GetDisplayName(out dn);
-                float? volumeLevel = GetApplicationVolume(dn);
-                Console.WriteLine(volumeLevel);
+                float volumeLevel = GetApplicationVolume(dn);
+                int roundedVolume = (int)Math.Round(volumeLevel);
+                Console.WriteLine("Application Name: " + dn );
 
                 Console.WriteLine(pid);
 
                 Application application = new Application();
 
                 application.name = dn;
-                application.volume = volumeLevel;
+                application.volume = roundedVolume;
+                application.pid = pid;
 
+                //var proc = Process.GetProcessById(pid);
+                //try
+                //{
+                //    Console.WriteLine(proc.MainModule.FileName);
+                //}
+                //catch (Exception e)
+                //{
+                //    Console.WriteLine(e.Message);
+                //}
+                
 
                 var query = "SELECT ProcessId, Name, ExecutablePath FROM Win32_Process WHERE processid = " + pid.ToString();
-
+                
 
                 using (var searcher = new ManagementObjectSearcher(query))
                 using (var results = searcher.Get())
@@ -154,6 +227,19 @@ namespace SetAppVolumne
                         Name = (string)x["Name"],
                         ExecutablePath = (string)x["ExecutablePath"]
                     });
+                    Console.WriteLine("Applicaiton name from search: " + processes.ElementAt(0).Name);
+                    Console.WriteLine("Applicaiton name from search: " + Process.GetProcessById((int)processes.ElementAt(0).ProcessId).MainWindowTitle);
+                    if (application.pid == 0)
+                    {
+                        application.name = "System Sounds";
+                    }
+                    else
+                    {
+                        application.name = Process.GetProcessById((int)processes.ElementAt(0).ProcessId).MainWindowTitle;
+                    }
+                    
+
+
 
                     foreach (var p in processes)
                     {
@@ -221,8 +307,54 @@ namespace SetAppVolumne
                 sessionEnumerator.GetSession(i, out ctl);
                 string dn;
                 ctl.GetDisplayName(out dn);
+                int pid = ctl.GetProcessId(out pid);
                 if (string.Compare(name, dn, StringComparison.OrdinalIgnoreCase) == 0)
                 {
+                    volumeControl = ctl as ISimpleAudioVolume;
+                    break;
+                }
+                Marshal.ReleaseComObject(ctl);
+            }
+            Marshal.ReleaseComObject(sessionEnumerator);
+            Marshal.ReleaseComObject(mgr);
+            Marshal.ReleaseComObject(speakers);
+            Marshal.ReleaseComObject(deviceEnumerator);
+            return volumeControl;
+        }
+        private static ISimpleAudioVolume GetVolumeObject(int requestPid)
+        {
+            // get the speakers (1st render + multimedia) device
+            IMMDeviceEnumerator deviceEnumerator = (IMMDeviceEnumerator)(new MMDeviceEnumerator());
+            IMMDevice speakers;
+            deviceEnumerator.GetDefaultAudioEndpoint(EDataFlow.eRender, ERole.eMultimedia, out speakers);
+
+            // activate the session manager. we need the enumerator
+            Guid IID_IAudioSessionManager2 = typeof(IAudioSessionManager2).GUID;
+            object o;
+            speakers.Activate(ref IID_IAudioSessionManager2, 0, IntPtr.Zero, out o);
+            IAudioSessionManager2 mgr = (IAudioSessionManager2)o;
+
+            // enumerate sessions for on this device
+            IAudioSessionEnumerator sessionEnumerator;
+            mgr.GetSessionEnumerator(out sessionEnumerator);
+            int count;
+            sessionEnumerator.GetCount(out count);
+
+            // search for an audio session with the required name
+            // NOTE: we could also use the process id instead of the app name (with IAudioSessionControl2)
+            ISimpleAudioVolume volumeControl = null;
+            for (int i = 0; i < count; i++)
+            {
+                IAudioSessionControl2 ctl;
+                sessionEnumerator.GetSession(i, out ctl);
+                string dn;
+                ctl.GetDisplayName(out dn);
+                int pid;
+                ctl.GetProcessId(out pid);
+                Console.WriteLine("Current pid in search: " + pid.ToString());
+                if (pid == requestPid)
+                {
+                    Console.WriteLine("Matching pid found.");
                     volumeControl = ctl as ISimpleAudioVolume;
                     break;
                 }
@@ -383,6 +515,8 @@ namespace SetAppVolumne
         [PreserveSig]
         int GetMute(out bool pbMute);
     }
+
+    
 }
 
 
