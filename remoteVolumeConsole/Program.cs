@@ -235,7 +235,16 @@ namespace SetAppVolumne
                     }
                     else
                     {
-                        application.name = Process.GetProcessById((int)processes.ElementAt(0).ProcessId).MainWindowTitle;
+                        string mainWindowTitle = Process.GetProcessById((int)processes.ElementAt(0).ProcessId).MainWindowTitle;
+                        string executableName = processes.ElementAt(0).Name;
+                        if (mainWindowTitle != "")
+                        {
+                            application.name = mainWindowTitle;
+                        }
+                        else
+                        {
+                            application.name = executableName.Split('.')[0];
+                        }
                     }
                     
 
